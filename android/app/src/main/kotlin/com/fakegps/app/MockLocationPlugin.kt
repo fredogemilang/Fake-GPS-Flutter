@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.annotation.NonNull
-import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -25,9 +25,9 @@ class MockLocationPlugin : MethodCallHandler {
     private lateinit var context: Context
     private lateinit var channel: MethodChannel
 
-    fun register(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        context = flutterPluginBinding.applicationContext
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "com.fakegps.app/mock_location")
+    fun register(context: Context, messenger: BinaryMessenger) {
+        this.context = context
+        channel = MethodChannel(messenger, "com.fakegps.app/mock_location")
         channel.setMethodCallHandler(this)
     }
 
