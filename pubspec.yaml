@@ -1,0 +1,27 @@
+name: fake_gps
+description: Aplikasi Fake GPS / Mock Location untuk Android.
+  Pilih lokasi di Google Maps, inject koordinat ke mock location provider.
+  Cloud build via Codemagic atau GitHub Actions.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_maps_flutter: ^2.10.0
+  geocoding: ^3.0.0
+  geolocator: ^13.0.0
+  http: ^1.2.0
+  permission_handler: ^11.0.0
+  shared_preferences: ^2.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
