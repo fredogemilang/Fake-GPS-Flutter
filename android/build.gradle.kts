@@ -1,14 +1,16 @@
-// Top-level build file (android/build.gradle.kts)
-plugins {
-    id("com.android.application") version "8.2.0" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.22" apply false
-}
-
 allprojects {
     repositories {
         google()
         mavenCentral()
     }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
 }
 
 tasks.register("clean", Delete::class) {

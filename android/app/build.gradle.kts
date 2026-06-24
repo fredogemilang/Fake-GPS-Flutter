@@ -1,7 +1,7 @@
-// App-level build file (android/app/build.gradle.kts)
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
@@ -23,6 +23,8 @@ android {
 
     buildTypes {
         release {
+            // Use debug signing for Codemagic (ganti dengan release keystore untuk Play Store)
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -50,8 +52,4 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.android.gms:play-services-location:21.0.1")
-
-    // Flutter embedding
-    debugImplementation("io.flutter:flutter_debug:1.0")
-    releaseImplementation("io.flutter:flutter_release:1.0")
 }
