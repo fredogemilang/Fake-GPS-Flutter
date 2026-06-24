@@ -1,56 +1,23 @@
 # ============================================================
-# Codemagic CI/CD Configuration
-# Build APK debug & AAB release untuk aplikasi Fake GPS
-# Trigger: push ke branch main
+# Codemagic CI/CD - Fake GPS
+# Build APK debug langsung, tanpa analyze/test
 # ============================================================
 
 workflows:
-  fake-gps-workflow:
+  fake-gps-build:
     name: Fake GPS Build
     max_build_duration: 60
     environment:
       flutter: stable
-      xcode: latest      # required even for Android builds
+      xcode: latest
       cocoapods: default
-    #  vars:
-    #    MAPS_API_KEY: Encrypted(...)   # <-- set via Codemagic UI > Environment Variables
+      vars:
+        MAPS_API_KEY: your-api-key-here  # ganti di Codemagic UI > Environment Variables
     scripts:
-      # -- Code analysis --
-      - name: Flutter analyze
-        script: flutter analyze --no-fatal-infos
-
-      # -- Run tests (jika ada) --
-      - name: Flutter test
-        script: flutter test || echo "No tests yet, skipping..."
-        ignore_failure: true
-
-      # -- Build APK debug --
       - name: Build APK debug
-        script: |
-          flutter build apk --debug \
-            --dart-define=MAPS_API_KEY=$MAPS_API_KEY
-        working_directory: .
-
-      # -- Build AAB release --
-      - name: Build AAB release
-        script: |
-          flutter build appbundle --release \
-            --dart-define=MAPS_API_KEY=$MAPS_API_KEY
-        working_directory: .
-
+        script: flutter build apk --debug --dart-define=MAPS_API_KEY=$MAPS_API_KEY
     artifacts:
       - build/app/outputs/flutter-apk/app-debug.apk
-      - build/app/outputs/bundle/release/app-release.aab
-
-    publishing:
-      email:
-        recipients:
-          - user@example.com   # ganti dengan email kamu
-        notify:
-          success: true
-          failure: true
-
-    # Trigger: auto-build saat push ke main
     triggering:
       events:
         - push
