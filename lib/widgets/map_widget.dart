@@ -2,25 +2,42 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 /// Widget peta Google Maps yang dipakai bersama oleh mode Teleport & Perjalanan.
-class MapWidget extends StatelessWidget {
-  final GoogleMapController? Function(GoogleMapController)? onMapCreated;
+class MapWidget extends StatefulWidget {
+  final void Function(GoogleMapController)? onMapCreated;
   final LatLng? initialPosition;
-  final LatLng? centerCrosshair;       // Posisi crosshair (mode teleport)
+  final bool showCrosshair;          // Tampilkan crosshair (mode teleport)
   final Set<Marker> markers;
   final Set<Polyline> polylines;
-  final CameraTargetBounds? cameraBounds;
   final void Function(LatLng)? onCenterChanged;  // Dipanggil saat map digeser
+  final void Function(LatLng)? onMapTap;          // Dipanggil saat map di-tap
 
   const MapWidget({
     super.key,
     this.onMapCreated,
     this.initialPosition,
-    this.centerCrosshair,
+    this.showCrosshair = true,
     this.markers = const {},
     this.polylines = const {},
-    this.cameraBounds,
     this.onCenterChanged,
+    this.onMapTap,
   });
+
+  @override
+  State<MapWidget> createState() => _MapWidgetState();
+}
+
+class _MapWidgetState extends State<MapWidget> {
+  GoogleMapController? _controller;
+
+  void _onMapCreated(GoogleMapController controller) {
+    _controller = controller;
+    widget.onMapCreated?.call(controller);
+  }
+
+  void _onCameraMove(CameraPosition position) {
+    // Update koordinat real-time saat map digeser
+    widget.onCenterChanged?.call(position.target);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,25 +45,22 @@ class MapWidget extends StatelessWidget {
       children: [
         GoogleMap(
           initialCameraPosition: CameraPosition(
-            target: initialPosition ?? const LatLng(-6.2088, 106.8456),
+            target: widget.initialPosition ?? const LatLng(-6.2088, 106.8456),
             zoom: 17,
           ),
-          markers: markers,
-          polylines: polylines,
+          markers: widget.markers,
+          polylines: widget.polylines,
           myLocationEnabled: true,
-          myLocationButtonEnabled: false,
+          myLocationButtonEnabled: true,
           zoomControlsEnabled: false,
           mapToolbarEnabled: false,
-          onMapCreated: onMapCreated,
-          onCameraIdle: () {
-            if (onCenterChanged != null && centerCrosshair != null) {
-              onCenterChanged!(centerCrosshair!);
-            }
-          },
+          onMapCreated: _onMapCreated,
+          onCameraMove: _onCameraMove,
+          onTap: widget.onMapTap,
         ),
 
         // Crosshair di tengah peta (mode teleport)
-        if (centerCrosshair != null)
+        if (widget.showCrosshair)
           const IgnorePointer(
             child: Center(
               child: Column(

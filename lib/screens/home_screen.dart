@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/mock_location_service.dart';
 import '../widgets/map_widget.dart';
 import '../widgets/search_bar.dart';
@@ -7,7 +8,6 @@ import '../widgets/teleport_panel.dart';
 import '../widgets/route_panel.dart';
 import '../widgets/joystick_overlay.dart';
 
-/// Layar utama dengan dua tab mode: Teleport (default) & Perjalanan.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -21,20 +21,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   LatLng _currentCenter = const LatLng(-6.2088, 106.8456); // Jakarta default
   String? _currentAddress;
   bool _isMockRunning = false;
+  bool _locationLoaded = false;
 
   // --- Tab state ---
   late TabController _tabController;
   int _activeTab = 0;
 
-  // --- Route state (mode perjalanan) ---
+  // --- Route state ---
   final List<LatLng> _waypoints = [];
-  double _speedKmh = 15; // Default speed: sepeda
+  double _speedKmh = 15;
 
   // --- Joystick state ---
   bool _showJoystick = false;
 
-  // --- API Key (diambil dari AndroidManifest meta-data via Method Channel, atau hardcoded untuk dev) ---
-  // Untuk production: inject via environment / CI/CD
+  // --- API Key ---
   static const String _mapsApiKey = String.fromEnvironment(
     'MAPS_API_KEY',
     defaultValue: 'YOUR_GOOGLE_MAPS_API_KEY_HERE',
@@ -44,9 +44,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(() {
-      setState(() => _activeTab = _tabController.index);
-    });
+    _tabController.addListener(() => setState(() => _activeTab = _tabController.index));
+    _initLocation();
     _checkMockStatus();
   }
 
@@ -57,13 +56,49 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     super.dispose();
   }
 
+  /// Dapatkan posisi GPS asli user saat pertama buka.
+  Future<void> _initLocation() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+
+      if (mounted) {
+        final userPos = LatLng(position.latitude, position.longitude);
+        setState(() {
+          _currentCenter = userPos;
+          _locationLoaded = true;
+        });
+        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(userPos, 17));
+      }
+    } catch (_) {
+      // GPS tidak tersedia — tetap pakai default
+    }
+  }
+
   Future<void> _checkMockStatus() async {
     final running = await MockLocationService.isRunning;
     if (mounted) setState(() => _isMockRunning = running);
   }
 
-  // --- Teleport: Start ---
+  /// Pindah lokasi instan (Teleport).
   Future<void> _onTeleportStart() async {
+    // Cek dulu apakah mock location app sudah dipilih
+    final enabled = await MockLocationService.isMockLocationEnabled;
+    if (!enabled && mounted) {
+      _showMockNotEnabledDialog();
+      return;
+    }
+
     final success = await MockLocationService.startMock(
       _currentCenter.latitude,
       _currentCenter.longitude,
@@ -73,23 +108,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(success
-              ? 'Lokasi dipindahkan ke ${_currentCenter.latitude.toStringAsFixed(4)}, ${_currentCenter.longitude.toStringAsFixed(4)}'
-              : 'Gagal! Pastikan aplikasi ini dipilih di Developer Options > Mock Location App'),
+              ? '📍 Lokasi dipindahkan ke ${_currentCenter.latitude.toStringAsFixed(4)}, ${_currentCenter.longitude.toStringAsFixed(4)}'
+              : '❌ Gagal! Cek Developer Options > Mock Location App'),
           backgroundColor: success ? Colors.green : Colors.red,
+          duration: const Duration(seconds: 3),
         ),
       );
     }
   }
 
-  // --- Route: Start ---
+  /// Mulai simulasi perjalanan.
   Future<void> _onRouteStart() async {
     if (_waypoints.length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Minimal 2 titik untuk rute perjalanan'),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('Minimal 2 titik untuk rute'), backgroundColor: Colors.orange),
       );
+      return;
+    }
+
+    final enabled = await MockLocationService.isMockLocationEnabled;
+    if (!enabled && mounted) {
+      _showMockNotEnabledDialog();
       return;
     }
 
@@ -97,10 +136,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         .map((w) => {'latitude': w.latitude, 'longitude': w.longitude})
         .toList();
 
-    final success = await MockLocationService.startRoute(
-      points: points,
-      speedKmh: _speedKmh,
-    );
+    final success = await MockLocationService.startRoute(points: points, speedKmh: _speedKmh);
 
     if (mounted) {
       setState(() {
@@ -110,15 +146,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(success
-              ? 'Perjalanan dimulai — ${_waypoints.length} titik, ${_speedKmh.toInt()} km/j'
-              : 'Gagal memulai perjalanan'),
+              ? '🚗 Perjalanan — ${_waypoints.length} titik, ${_speedKmh.toInt()} km/j'
+              : '❌ Gagal memulai perjalanan'),
           backgroundColor: success ? Colors.green : Colors.red,
+          duration: const Duration(seconds: 3),
         ),
       );
     }
   }
 
-  // --- Stop mock ---
+  /// Stop mock.
   Future<void> _onStop() async {
     await MockLocationService.stopMock();
     if (mounted) {
@@ -127,37 +164,52 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _showJoystick = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Mock location dihentikan'),
-          backgroundColor: Colors.blueGrey,
-        ),
+        const SnackBar(content: Text('Mock location dihentikan'), backgroundColor: Colors.blueGrey),
       );
     }
   }
 
-  // --- Map center changed (teleport crosshair) ---
+  /// Map center berubah (dipanggil real-time dari onCameraMove).
   void _onMapCenterChanged(LatLng newCenter) {
-    _currentCenter = newCenter;
-    // Update address bisa ditambahkan reverse geocoding di sini
+    if (_activeTab == 0) {
+      setState(() => _currentCenter = newCenter);
+    }
   }
 
-  // --- Search place selected ---
+  /// Search place → animate ke lokasi.
   void _onPlaceSelected(String name, LatLng position) {
-    _currentCenter = position;
-    _currentAddress = name;
+    setState(() {
+      _currentCenter = position;
+      _currentAddress = name;
+    });
     _mapController?.animateCamera(CameraUpdate.newLatLngZoom(position, 18));
-    setState(() {});
   }
 
-  // --- Route: add waypoint ---
+  /// Tap di map → tambah waypoint (mode perjalanan).
   void _onMapTap(LatLng position) {
     if (_activeTab == 1 && !_isMockRunning) {
       setState(() => _waypoints.add(position));
     }
   }
 
-  void _clearWaypoints() {
-    setState(() => _waypoints.clear());
+  void _clearWaypoints() => setState(() => _waypoints.clear());
+
+  /// Dialog panduan jika mock location belum diaktifkan.
+  void _showMockNotEnabledDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('⚙️ Mock Location belum aktif'),
+        content: const Text(
+          'Buka Settings → Developer Options → '
+          '"Select mock location app" → pilih "Fake GPS".\n\n'
+          'Kalau Developer Options belum muncul, tap "Build Number" 7× di About Phone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
   }
 
   @override
@@ -165,30 +217,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Scaffold(
       body: Stack(
         children: [
-          // --- PETA (full screen) ---
+          // --- PETA ---
           MapWidget(
             initialPosition: _currentCenter,
-            centerCrosshair: _activeTab == 0 ? _currentCenter : null,
+            showCrosshair: _activeTab == 0,
             markers: _buildMarkers(),
             polylines: _buildPolylines(),
-            onMapCreated: (controller) => _mapController = controller,
-            onCenterChanged: _activeTab == 0 ? _onMapCenterChanged : null,
+            onMapCreated: (c) => _mapController = c,
+            onCenterChanged: _onMapCenterChanged,
+            onMapTap: _onMapTap,
           ),
 
-          // Handle tap on map for waypoints (route mode)
-          if (_activeTab == 1)
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTapDown: (details) {
-                  // Convert screen position to LatLng via the map controller
-                  // For simplicity, tap detection uses a different approach -
-                  // the GoogleMap's onTap callback
-                },
-              ),
-            ),
-
-          // --- Top: Search bar + Tab bar ---
+          // --- Top: Tab + Search ---
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             left: 0,
@@ -202,20 +242,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 2))],
                   ),
                   child: TabBar(
                     controller: _tabController,
                     tabs: const [
-                      Tab(icon: Icon(Icons.pin_drop), text: 'Teleport'),
-                      Tab(icon: Icon(Icons.route), text: 'Perjalanan'),
+                      Tab(icon: Icon(Icons.pin_drop, size: 20), text: 'Teleport'),
+                      Tab(icon: Icon(Icons.route, size: 20), text: 'Perjalanan'),
                     ],
+                    labelStyle: const TextStyle(fontSize: 12),
                     indicatorSize: TabBarIndicatorSize.tab,
                     indicator: BoxDecoration(
                       color: Theme.of(context).colorScheme.primaryContainer,
@@ -224,38 +259,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
                     unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                     dividerColor: Colors.transparent,
-                    splashFactory: NoSplash.splashFactory,
                   ),
                 ),
                 const SizedBox(height: 8),
-
-                // Search bar
-                LocationSearchBar(
-                  apiKey: _mapsApiKey,
-                  onPlaceSelected: _onPlaceSelected,
-                ),
+                LocationSearchBar(apiKey: _mapsApiKey, onPlaceSelected: _onPlaceSelected),
               ],
             ),
           ),
 
-          // --- Joystick (mode perjalanan + mock aktif) ---
+          // --- Joystick ---
           if (_showJoystick && _activeTab == 1)
             Positioned(
               right: 16,
               bottom: 280,
-              child: JoystickOverlay(
-                onDirectionChanged: (dx, dy) {
-                  // dx, dy: arah gerakan (-1, 0, 1)
-                  // Bisa dikirim ke native untuk update arah
-                },
-              ),
+              child: JoystickOverlay(onDirectionChanged: (dx, dy) {}),
             ),
 
-          // --- Bottom panel ---
+          // --- Bottom Panel ---
           Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
+            bottom: 0, left: 0, right: 0,
             child: _activeTab == 0
                 ? TeleportPanel(
                     latitude: _currentCenter.latitude,
@@ -281,30 +303,24 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Set<Marker> _buildMarkers() {
-    final markers = <Marker>{};
-
-    // Start marker (posisi awal)
-    markers.add(
+    final markers = <Marker>{
       Marker(
-        markerId: const MarkerId('current_position'),
+        markerId: const MarkerId('target'),
         position: _currentCenter,
         icon: BitmapDescriptor.defaultMarkerWithHue(
           _isMockRunning ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueRed,
         ),
-        infoWindow: const InfoWindow(title: 'Lokasi Mock'),
+        infoWindow: const InfoWindow(title: 'Target'),
       ),
-    );
+    };
 
-    // Waypoint markers (mode perjalanan)
     for (int i = 0; i < _waypoints.length; i++) {
-      markers.add(
-        Marker(
-          markerId: MarkerId('waypoint_$i'),
-          position: _waypoints[i],
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: InfoWindow(title: 'Titik ${i + 1}'),
-        ),
-      );
+      markers.add(Marker(
+        markerId: MarkerId('wp_$i'),
+        position: _waypoints[i],
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        infoWindow: InfoWindow(title: 'Titik ${i + 1}'),
+      ));
     }
 
     return markers;
@@ -312,10 +328,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Set<Polyline> _buildPolylines() {
     if (_waypoints.length < 2) return {};
-
     return {
       Polyline(
-        polylineId: const PolylineId('route_preview'),
+        polylineId: const PolylineId('route'),
         points: _waypoints,
         color: Colors.blue,
         width: 4,
